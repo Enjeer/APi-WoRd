@@ -1,12 +1,13 @@
 import os
 import contextlib
-from typing import List, Optional, Dict, Any
+from typing import Any, Literal
 
 import httpx
 from dotenv import load_dotenv
 from starlette.applications import Starlette
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
+
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
@@ -15,8 +16,15 @@ load_dotenv()
 YANDEX_TOKEN = os.getenv("YANDEX_WORDSTAT_TOKEN")
 WORDSTAT_BASE = "https://api.wordstat.yandex.net/v1"
 
+if not YANDEX_TOKEN:
+    raise RuntimeError("Не задан YANDEX_WORDSTAT_TOKEN")
+
 RENDER_HOST = os.getenv("RENDER_EXTERNAL_HOSTNAME")   # например my-app.onrender.com
-CUSTOM_HOST = os.getenv("CUSTOM_DOMAIN")              # если есть свой домен, добавь в Render env vars
+CUSTOM_HOST = os.getenv("CUSTOM_DOMAIN")              # если есть свой домен
+
+Device = Literal["all", "desktop", "phone", "tablet"]
+Period = Literal["daily", "weekly", "monthly"]
+RegionType = Literal["cities", "regions", "all"]
 
 allowed_hosts = [
     "127.0.0.1:*",
@@ -40,7 +48,6 @@ if CUSTOM_HOST:
 mcp = FastMCP(
     name="Yandex Wordstat",
     instructions="Инструменты для Wordstat: top requests, dynamics, regions, user info",
-    host="0.0.0.0",
     transport_security=TransportSecuritySettings(
         enable_dns_rebinding_protection=True,
         allowed_hosts=allowed_hosts,
@@ -48,6 +55,7 @@ mcp = FastMCP(
     ),
     json_response=True,
 )
+
 
 async def _post_wordstat(endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
     headers = {
@@ -69,6 +77,7 @@ async def _post_wordstat(endpoint: str, payload: dict[str, Any]) -> dict[str, An
                 detail = e.response.json()
             except Exception:
                 detail = e.response.text
+
             return {
                 "ok": False,
                 "status_code": e.response.status_code,
@@ -76,21 +85,33 @@ async def _post_wordstat(endpoint: str, payload: dict[str, Any]) -> dict[str, An
                 "detail": detail,
             }
         except Exception as e:
-            return {"ok": False, "error": "internal_error", "detail": str(e)}
+            return {
+                "ok": False,
+                "error": "internal_error",
+                "detail": str(e),
+            }
+
 
 @mcp.tool()
 async def wordstat_top_requests(
     phrase: str,
-    regions: Optional[List[int]] = None,
-    devices: Optional[List[str]] = None,
+    regions: list[int] | None = None,
+    devices: list[Device] | None = None,
     num_phrases: int = 50,
-) -> Dict[str, Any]:
-    payload: Dict[str, Any] = {"phrase": phrase, "numPhrases": num_phrases}
+) -> dict[str, Any]:
+    """Возвращает популярные запросы и похожие фразы."""
+    payload: dict[str, Any] = {
+        "phrase": phrase,
+        "numPhrases": num_phrases,
+    }
+
     if regions:
         payload["regions"] = regions
     if devices:
         payload["devices"] = devices
+
     return await _post_wordstat("/topRequests", payload)
+
 
 @mcp.tool()
 async def wordstat_dynamics(
@@ -101,18 +122,22 @@ async def wordstat_dynamics(
     regions: list[int] | None = None,
     devices: list[Device] | None = None,
 ) -> dict[str, Any]:
+    """Возвращает динамику по фразе."""
     payload: dict[str, Any] = {
         "phrase": phrase,
         "period": period,
         "fromDate": from_date,
     }
+    
     if to_date:
         payload["toDate"] = to_date
     if regions:
         payload["regions"] = regions
     if devices:
         payload["devices"] = devices
+
     return await _post_wordstat("/dynamics", payload)
+
 
 @mcp.tool()
 async def wordstat_regions(
@@ -120,25 +145,33 @@ async def wordstat_regions(
     region_type: RegionType = "all",
     devices: list[Device] | None = None,
 ) -> dict[str, Any]:
+    """Возвращает распределение по регионам."""
     payload: dict[str, Any] = {
         "phrase": phrase,
         "regionType": region_type,
     }
+
     if devices:
         payload["devices"] = devices
+
     return await _post_wordstat("/regions", payload)
+
 
 @mcp.tool()
 async def wordstat_user_info() -> dict[str, Any]:
+    """Возвращает лимиты и остаток квоты."""
     return await _post_wordstat("/userInfo", {})
+
 
 async def health(request):
     return JSONResponse({"ok": True, "service": "wordstat-mcp"})
+
 
 @contextlib.asynccontextmanager
 async def lifespan(app: Starlette):
     async with mcp.session_manager.run():
         yield
+
 
 app = Starlette(
     routes=[
