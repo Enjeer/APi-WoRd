@@ -2,7 +2,7 @@ import os
 import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI
-from mcp.server.fastapi import MCPServer
+from modelcontextprotocol.server.fastapi import MCPServer
 
 load_dotenv()
 
