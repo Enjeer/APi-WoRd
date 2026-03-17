@@ -78,6 +78,18 @@ async def mcp_endpoint(request: Request):
     result = await call_wordstat(tool, params)
     return JSONResponse({"result": result})
 
+
+@app.get("/mcp")
+def mcp_handshake():
+    return {
+        "tools": [
+            "wordstat_top_requests",
+            "wordstat_dynamics",
+            "wordstat_regions",
+            "wordstat_user_info"
+        ]
+    }
+    
 # Корневой endpoint
 @app.get("/")
 def root():
