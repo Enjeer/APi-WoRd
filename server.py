@@ -31,10 +31,6 @@ async def call_wordstat(endpoint, payload):
 
 @app.post("/mcp")
 async def mcp_endpoint(request: Request):
-    """
-    Простая реализация MCP: ChatGPT присылает JSON с полями:
-    { "tool": "<tool_name>", "params": {...} }
-    """
     data = await request.json()
     tool = data.get("tool")
     params = data.get("params", {})
@@ -43,7 +39,21 @@ async def mcp_endpoint(request: Request):
         return JSONResponse({"error": "Unknown tool"}, status_code=400)
 
     endpoint = TOOLS[tool]
-    result = await call_wordstat(endpoint, params)
+
+    try:
+        async with httpx.AsyncClient() as client:
+            headers = {
+                "Authorization": f"Bearer {YANDEX_TOKEN}",
+                "Content-Type": "application/json"
+            }
+            r = await client.post(f"{WORDSTAT_BASE}{endpoint}", headers=headers, json=params)
+            r.raise_for_status()
+            result = r.json()
+    except httpx.HTTPStatusError as e:
+        result = {"error": f"Wordstat returned {r.status_code}", "detail": r.text}
+    except Exception as e:
+        result = {"error": "Internal Server Error", "detail": str(e)}
+
     return JSONResponse({"result": result})
 
 @app.get("/")
