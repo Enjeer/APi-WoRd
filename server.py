@@ -19,8 +19,8 @@ WORDSTAT_BASE = "https://api.wordstat.yandex.net/v1"
 if not YANDEX_TOKEN:
     raise RuntimeError("Не задан YANDEX_WORDSTAT_TOKEN")
 
-RENDER_HOST = os.getenv("RENDER_EXTERNAL_HOSTNAME")   # например my-app.onrender.com
-CUSTOM_HOST = os.getenv("CUSTOM_DOMAIN")              # если есть свой домен
+RENDER_HOST = os.getenv("RENDER_EXTERNAL_HOSTNAME")
+CUSTOM_HOST = os.getenv("CUSTOM_DOMAIN")
 
 Device = Literal["all", "desktop", "phone", "tablet"]
 Period = Literal["daily", "weekly", "monthly"]
@@ -99,17 +99,14 @@ async def wordstat_top_requests(
     devices: list[Device] | None = None,
     num_phrases: int = 50,
 ) -> dict[str, Any]:
-    """Возвращает популярные запросы и похожие фразы."""
     payload: dict[str, Any] = {
         "phrase": phrase,
         "numPhrases": num_phrases,
     }
-
     if regions:
         payload["regions"] = regions
     if devices:
         payload["devices"] = devices
-
     return await _post_wordstat("/topRequests", payload)
 
 
@@ -122,20 +119,17 @@ async def wordstat_dynamics(
     regions: list[int] | None = None,
     devices: list[Device] | None = None,
 ) -> dict[str, Any]:
-    """Возвращает динамику по фразе."""
     payload: dict[str, Any] = {
         "phrase": phrase,
         "period": period,
         "fromDate": from_date,
     }
-    
     if to_date:
         payload["toDate"] = to_date
     if regions:
         payload["regions"] = regions
     if devices:
         payload["devices"] = devices
-
     return await _post_wordstat("/dynamics", payload)
 
 
@@ -145,21 +139,17 @@ async def wordstat_regions(
     region_type: RegionType = "all",
     devices: list[Device] | None = None,
 ) -> dict[str, Any]:
-    """Возвращает распределение по регионам."""
     payload: dict[str, Any] = {
         "phrase": phrase,
         "regionType": region_type,
     }
-
     if devices:
         payload["devices"] = devices
-
     return await _post_wordstat("/regions", payload)
 
 
 @mcp.tool()
 async def wordstat_user_info() -> dict[str, Any]:
-    """Возвращает лимиты и остаток квоты."""
     return await _post_wordstat("/userInfo", {})
 
 
@@ -169,8 +159,12 @@ async def health(request):
 
 @contextlib.asynccontextmanager
 async def lifespan(app: Starlette):
-    async with mcp.session_manager.run():
+    # Запускаем MCP-сессию и держим её активной на весь lifetime приложения
+    await mcp.session_manager.start()
+    try:
         yield
+    finally:
+        await mcp.session_manager.stop()
 
 
 app = Starlette(
