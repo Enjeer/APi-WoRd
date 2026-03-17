@@ -1,110 +1,130 @@
-# server.py
 import os
-import asyncio
-import json
+import contextlib
+from typing import Literal, Any
+
 import httpx
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
-from sse_starlette.sse import EventSourceResponse
 from dotenv import load_dotenv
+from starlette.applications import Starlette
+from starlette.responses import JSONResponse
+from starlette.routing import Mount, Route
+from mcp.server.fastmcp import FastMCP
 
 load_dotenv()
 
 YANDEX_TOKEN = os.getenv("YANDEX_WORDSTAT_TOKEN")
 WORDSTAT_BASE = "https://api.wordstat.yandex.net/v1"
 
-app = FastAPI()
+if not YANDEX_TOKEN:
+    raise RuntimeError("Не задан YANDEX_WORDSTAT_TOKEN")
 
-TOOLS = ["wordstat_top_requests", "wordstat_dynamics", "wordstat_regions", "wordstat_user_info"]
+Device = Literal["all", "desktop", "phone", "tablet"]
+Period = Literal["daily", "weekly", "monthly"]
+RegionType = Literal["cities", "regions", "all"]
 
-# ----- Вспомогательная функция для вызова Wordstat -----
-async def call_wordstat(tool, params):
+mcp = FastMCP(
+    name="Yandex Wordstat",
+    instructions="Инструменты для Wordstat: top requests, dynamics, regions, user info",
+    json_response=True,
+)
+
+async def _post_wordstat(endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
     headers = {
         "Authorization": f"Bearer {YANDEX_TOKEN}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
     }
 
-    # Конвертация params в payload для Wordstat
-    if tool == "wordstat_top_requests":
-        endpoint = "/topRequests"
-        payload = {
-            "phrase": params.get("phrase"),
-            "regions": params.get("regions", [225]),
-            "devices": params.get("devices", ["all"])
-        }
-    elif tool == "wordstat_dynamics":
-        endpoint = "/dynamics"
-        payload = {
-            "phrase": params.get("phrase"),
-            "period": params.get("period", "daily"),
-            "fromDate": params.get("fromDate"),
-            "toDate": params.get("toDate"),
-            "regions": params.get("regions", [225]),
-            "devices": params.get("devices", ["all"])
-        }
-    elif tool == "wordstat_regions":
-        endpoint = "/regions"
-        payload = {
-            "phrase": params.get("phrase"),
-            "regionType": params.get("regionType", "regions"),
-            "devices": params.get("devices", ["all"])
-        }
-    elif tool == "wordstat_user_info":
-        endpoint = "/userInfo"
-        payload = {}
-    else:
-        return {"error": "Unknown tool"}
-
-    # POST-запрос в Wordstat
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=30.0) as client:
         try:
-            r = await client.post(f"{WORDSTAT_BASE}{endpoint}", headers=headers, json=payload)
-            r.raise_for_status()
-            return r.json()
-        except httpx.HTTPStatusError:
-            return {"error": f"Wordstat returned {r.status_code}", "detail": r.text}
+            resp = await client.post(
+                f"{WORDSTAT_BASE}{endpoint}",
+                headers=headers,
+                json=payload,
+            )
+            resp.raise_for_status()
+            return {"ok": True, "data": resp.json()}
+        except httpx.HTTPStatusError as e:
+            try:
+                detail = e.response.json()
+            except Exception:
+                detail = e.response.text
+            return {
+                "ok": False,
+                "status_code": e.response.status_code,
+                "error": "wordstat_http_error",
+                "detail": detail,
+            }
         except Exception as e:
-            return {"error": "Internal Server Error", "detail": str(e)}
+            return {"ok": False, "error": "internal_error", "detail": str(e)}
 
-# ----- MCP POST endpoint для инструментов -----
-@app.post("/mcp")
-async def mcp_endpoint(request: Request):
-    data = await request.json()
-    tool = data.get("tool")
-    params = data.get("params", {})
+@mcp.tool()
+async def wordstat_top_requests(
+    phrase: str,
+    regions: list[int] | None = None,
+    devices: list[Device] | None = None,
+    num_phrases: int = 50,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "phrase": phrase,
+        "numPhrases": num_phrases,
+    }
+    if regions:
+        payload["regions"] = regions
+    if devices:
+        payload["devices"] = devices
+    return await _post_wordstat("/topRequests", payload)
 
-    if tool not in TOOLS:
-        return JSONResponse({"error": "Unknown tool"}, status_code=400)
+@mcp.tool()
+async def wordstat_dynamics(
+    phrase: str,
+    period: Period,
+    from_date: str,
+    to_date: str | None = None,
+    regions: list[int] | None = None,
+    devices: list[Device] | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "phrase": phrase,
+        "period": period,
+        "fromDate": from_date,
+    }
+    if to_date:
+        payload["toDate"] = to_date
+    if regions:
+        payload["regions"] = regions
+    if devices:
+        payload["devices"] = devices
+    return await _post_wordstat("/dynamics", payload)
 
-    result = await call_wordstat(tool, params)
-    return JSONResponse({"result": result})
+@mcp.tool()
+async def wordstat_regions(
+    phrase: str,
+    region_type: RegionType = "all",
+    devices: list[Device] | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "phrase": phrase,
+        "regionType": region_type,
+    }
+    if devices:
+        payload["devices"] = devices
+    return await _post_wordstat("/regions", payload)
 
-# ----- MCP GET endpoint для SSE handshake -----
-@app.get("/mcp")
-async def mcp_sse():
-    async def event_generator():
-        # handshake: список инструментов
-        yield {
-            "event": "ready",
-            "data": json.dumps({
-                "tools": [
-                    {"name": tool, "description": f"Call Yandex Wordstat {tool}"}
-                    for tool in TOOLS
-                ]
-            })
-        }
-        # держим соединение открытым для GPT (можно доработать под streaming)
-        while True:
-            await asyncio.sleep(10)
+@mcp.tool()
+async def wordstat_user_info() -> dict[str, Any]:
+    return await _post_wordstat("/userInfo", {})
 
-    return EventSourceResponse(event_generator())
+async def health(request):
+    return JSONResponse({"ok": True, "service": "wordstat-mcp"})
 
-# ----- Корневой endpoint -----
-@app.get("/")
-def root():
-    return {"status": "server works"}
+@contextlib.asynccontextmanager
+async def lifespan(app: Starlette):
+    async with mcp.session_manager.run():
+        yield
 
-# ----- Проверка токена -----
-@app.get("/check-token")
-def check_token():
-    return {"token_set": bool(YANDEX_TOKEN)}
+app = Starlette(
+    routes=[
+        Route("/", health),
+        Mount("/", app=mcp.streamable_http_app()),
+    ],
+    lifespan=lifespan,
+)
