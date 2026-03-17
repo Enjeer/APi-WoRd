@@ -49,9 +49,7 @@ mcp = FastMCP(
     name="Yandex Wordstat",
     instructions="Инструменты для Wordstat: top requests, dynamics, regions, user info",
     transport_security=TransportSecuritySettings(
-        enable_dns_rebinding_protection=True,
-        allowed_hosts=allowed_hosts,
-        allowed_origins=allowed_origins,
+        enable_dns_rebinding_protection=False,
     ),
     json_response=True,
 )
