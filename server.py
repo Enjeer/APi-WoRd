@@ -49,3 +49,7 @@ async def mcp_endpoint(request: Request):
 @app.get("/")
 def root():
     return {"status": "server works"}
+
+@app.get("/check-token")
+def check_token():
+    return {"token_set": bool(YANDEX_TOKEN)}
