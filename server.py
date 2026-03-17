@@ -1,6 +1,6 @@
 import os
 import contextlib
-from typing import Literal, Any
+from typing import List, Optional, Dict, Any
 
 import httpx
 from dotenv import load_dotenv
@@ -81,14 +81,11 @@ async def _post_wordstat(endpoint: str, payload: dict[str, Any]) -> dict[str, An
 @mcp.tool()
 async def wordstat_top_requests(
     phrase: str,
-    regions: list[int] | None = None,
-    devices: list[Device] | None = None,
+    regions: Optional[List[int]] = None,
+    devices: Optional[List[str]] = None,
     num_phrases: int = 50,
-) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "phrase": phrase,
-        "numPhrases": num_phrases,
-    }
+) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {"phrase": phrase, "numPhrases": num_phrases}
     if regions:
         payload["regions"] = regions
     if devices:
