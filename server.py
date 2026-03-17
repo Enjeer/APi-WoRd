@@ -159,7 +159,7 @@ async def health(request):
 
 @contextlib.asynccontextmanager
 async def lifespan(app: Starlette):
-    async with mcp.session_manager:
+    async with mcp.session_manager.run():
         yield
 
 
