@@ -1,8 +1,10 @@
+# server.py
 import os
+import json
 import httpx
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
-from fastapi import FastAPI
-from modelcontextprotocol.server.fastapi import MCPServer
 
 load_dotenv()
 
@@ -10,46 +12,40 @@ YANDEX_TOKEN = os.getenv("YANDEX_WORDSTAT_TOKEN")
 WORDSTAT_BASE = "https://api.wordstat.yandex.net/v1"
 
 app = FastAPI()
-mcp = MCPServer(app)
 
+TOOLS = {
+    "wordstat_top_requests": "/topRequests",
+    "wordstat_dynamics": "/dynamics",
+    "wordstat_regions": "/regions",
+    "wordstat_user_info": "/userInfo"
+}
 
 async def call_wordstat(endpoint, payload):
     headers = {
         "Authorization": f"Bearer {YANDEX_TOKEN}",
         "Content-Type": "application/json"
     }
-
     async with httpx.AsyncClient() as client:
-        r = await client.post(
-            f"{WORDSTAT_BASE}{endpoint}",
-            headers=headers,
-            json=payload
-        )
+        r = await client.post(f"{WORDSTAT_BASE}{endpoint}", headers=headers, json=payload)
         return r.json()
 
+@app.post("/mcp")
+async def mcp_endpoint(request: Request):
+    """
+    Простая реализация MCP: ChatGPT присылает JSON с полями:
+    { "tool": "<tool_name>", "params": {...} }
+    """
+    data = await request.json()
+    tool = data.get("tool")
+    params = data.get("params", {})
 
-@mcp.tool()
-async def wordstat_top_requests(query: str):
-    """Top search requests for a keyword"""
-    return await call_wordstat("/topRequests", {"query": query})
+    if tool not in TOOLS:
+        return JSONResponse({"error": "Unknown tool"}, status_code=400)
 
+    endpoint = TOOLS[tool]
+    result = await call_wordstat(endpoint, params)
+    return JSONResponse({"result": result})
 
-@mcp.tool()
-async def wordstat_dynamics(query: str):
-    """Search dynamics"""
-    return await call_wordstat("/dynamics", {"query": query})
-
-
-@mcp.tool()
-async def wordstat_regions(query: str):
-    """Regional search distribution"""
-    return await call_wordstat("/regions", {"query": query})
-
-
-@mcp.tool()
-async def wordstat_user_info():
-    """User info from Wordstat"""
-    return await call_wordstat("/userInfo", {})
-
-
-mcp.mount("/mcp")
+@app.get("/")
+def root():
+    return {"status": "server works"}
