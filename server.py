@@ -159,12 +159,8 @@ async def health(request):
 
 @contextlib.asynccontextmanager
 async def lifespan(app: Starlette):
-    # Запускаем MCP-сессию и держим её активной на весь lifetime приложения
-    await mcp.session_manager.start()
-    try:
+    async with mcp.session_manager:
         yield
-    finally:
-        await mcp.session_manager.stop()
 
 
 app = Starlette(
