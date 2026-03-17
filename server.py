@@ -1,8 +1,11 @@
 # server.py
 import os
+import asyncio
+import json
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from sse_starlette.sse import EventSourceResponse
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -14,16 +17,14 @@ app = FastAPI()
 
 TOOLS = ["wordstat_top_requests", "wordstat_dynamics", "wordstat_regions", "wordstat_user_info"]
 
+# ----- Вспомогательная функция для вызова Wordstat -----
 async def call_wordstat(tool, params):
-    """
-    Конвертирует входящие params в JSON для Wordstat API
-    """
     headers = {
         "Authorization": f"Bearer {YANDEX_TOKEN}",
         "Content-Type": "application/json"
     }
 
-    # Конвертация params в payload в зависимости от инструмента
+    # Конвертация params в payload для Wordstat
     if tool == "wordstat_top_requests":
         endpoint = "/topRequests"
         payload = {
@@ -65,7 +66,7 @@ async def call_wordstat(tool, params):
         except Exception as e:
             return {"error": "Internal Server Error", "detail": str(e)}
 
-# MCP endpoint
+# ----- MCP POST endpoint для инструментов -----
 @app.post("/mcp")
 async def mcp_endpoint(request: Request):
     data = await request.json()
@@ -78,24 +79,32 @@ async def mcp_endpoint(request: Request):
     result = await call_wordstat(tool, params)
     return JSONResponse({"result": result})
 
-
+# ----- MCP GET endpoint для SSE handshake -----
 @app.get("/mcp")
-def mcp_handshake():
-    return {
-        "tools": [
-            "wordstat_top_requests",
-            "wordstat_dynamics",
-            "wordstat_regions",
-            "wordstat_user_info"
-        ]
-    }
-    
-# Корневой endpoint
+async def mcp_sse():
+    async def event_generator():
+        # handshake: список инструментов
+        yield {
+            "event": "ready",
+            "data": json.dumps({
+                "tools": [
+                    {"name": tool, "description": f"Call Yandex Wordstat {tool}"}
+                    for tool in TOOLS
+                ]
+            })
+        }
+        # держим соединение открытым для GPT (можно доработать под streaming)
+        while True:
+            await asyncio.sleep(10)
+
+    return EventSourceResponse(event_generator())
+
+# ----- Корневой endpoint -----
 @app.get("/")
 def root():
     return {"status": "server works"}
 
-# Проверка токена
+# ----- Проверка токена -----
 @app.get("/check-token")
 def check_token():
     return {"token_set": bool(YANDEX_TOKEN)}
