@@ -1,17 +1,16 @@
 import os
-import json
 import httpx
-from fastapi import FastAPI, Request
-from sse_starlette.sse import EventSourceResponse
 from dotenv import load_dotenv
+from fastapi import FastAPI
+from mcp.server.fastapi import MCPServer
 
 load_dotenv()
 
 YANDEX_TOKEN = os.getenv("YANDEX_WORDSTAT_TOKEN")
-
 WORDSTAT_BASE = "https://api.wordstat.yandex.net/v1"
 
 app = FastAPI()
+mcp = MCPServer(app)
 
 
 async def call_wordstat(endpoint, payload):
@@ -29,74 +28,28 @@ async def call_wordstat(endpoint, payload):
         return r.json()
 
 
-TOOLS = {
-    "wordstat_top_requests": {
-        "endpoint": "/topRequests"
-    },
-    "wordstat_dynamics": {
-        "endpoint": "/dynamics"
-    },
-    "wordstat_regions": {
-        "endpoint": "/regions"
-    },
-    "wordstat_user_info": {
-        "endpoint": "/userInfo"
-    }
-}
+@mcp.tool()
+async def wordstat_top_requests(query: str):
+    """Top search requests for a keyword"""
+    return await call_wordstat("/topRequests", {"query": query})
 
 
-@app.get("/mcp")
-async def mcp_endpoint(request: Request):
+@mcp.tool()
+async def wordstat_dynamics(query: str):
+    """Search dynamics"""
+    return await call_wordstat("/dynamics", {"query": query})
 
-    async def event_generator():
 
-        # MCP handshake
-        yield {
-            "event": "ready",
-            "data": json.dumps({
-                "tools": [
-                    {
-                        "name": name,
-                        "description": f"Call Yandex Wordstat {cfg['endpoint']}",
-                        "input_schema": {
-                            "type": "object",
-                            "properties": {
-                                "query": {"type": "string"}
-                            }
-                        }
-                    }
-                    for name, cfg in TOOLS.items()
-                ]
-            })
-        }
+@mcp.tool()
+async def wordstat_regions(query: str):
+    """Regional search distribution"""
+    return await call_wordstat("/regions", {"query": query})
 
-        async for message in request.stream():
 
-            if not message:
-                continue
+@mcp.tool()
+async def wordstat_user_info():
+    """User info from Wordstat"""
+    return await call_wordstat("/userInfo", {})
 
-            try:
-                data = json.loads(message)
-            except:
-                continue
 
-            tool = data.get("tool")
-            params = data.get("params", {})
-
-            if tool not in TOOLS:
-                yield {
-                    "event": "error",
-                    "data": json.dumps({"error": "Unknown tool"})
-                }
-                continue
-
-            endpoint = TOOLS[tool]["endpoint"]
-
-            result = await call_wordstat(endpoint, params)
-
-            yield {
-                "event": "result",
-                "data": json.dumps(result)
-            }
-
-    return EventSourceResponse(event_generator())
+mcp.mount("/mcp")
