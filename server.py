@@ -2,7 +2,7 @@ import os
 import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI
-from mcp.server.fastapi import MCPServer
+from modelcontextprotocol.server.fastapi import MCPServer
 
 load_dotenv()
 
@@ -18,19 +18,14 @@ async def call_wordstat(endpoint, payload):
         "Authorization": f"Bearer {YANDEX_TOKEN}",
         "Content-Type": "application/json"
     }
-
     async with httpx.AsyncClient() as client:
-        r = await client.post(
-            f"{WORDSTAT_BASE}{endpoint}",
-            headers=headers,
-            json=payload
-        )
+        r = await client.post(f"{WORDSTAT_BASE}{endpoint}", headers=headers, json=payload)
         return r.json()
 
 
 @mcp.tool()
 async def wordstat_top_requests(query: str):
-    """Top search requests for a keyword"""
+    """Top search requests"""
     return await call_wordstat("/topRequests", {"query": query})
 
 
@@ -42,14 +37,20 @@ async def wordstat_dynamics(query: str):
 
 @mcp.tool()
 async def wordstat_regions(query: str):
-    """Regional search distribution"""
+    """Regional distribution"""
     return await call_wordstat("/regions", {"query": query})
 
 
 @mcp.tool()
 async def wordstat_user_info():
-    """User info from Wordstat"""
+    """User info"""
     return await call_wordstat("/userInfo", {})
 
 
+# MCP endpoint
 mcp.mount("/mcp")
+
+# Temporary root endpoint to check server
+@app.get("/")
+def test():
+    return {"status": "server works"}
