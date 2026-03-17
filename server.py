@@ -8,22 +8,44 @@ from starlette.applications import Starlette
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 load_dotenv()
 
 YANDEX_TOKEN = os.getenv("YANDEX_WORDSTAT_TOKEN")
 WORDSTAT_BASE = "https://api.wordstat.yandex.net/v1"
 
-if not YANDEX_TOKEN:
-    raise RuntimeError("Не задан YANDEX_WORDSTAT_TOKEN")
+RENDER_HOST = os.getenv("RENDER_EXTERNAL_HOSTNAME")   # например my-app.onrender.com
+CUSTOM_HOST = os.getenv("CUSTOM_DOMAIN")              # если есть свой домен, добавь в Render env vars
 
-Device = Literal["all", "desktop", "phone", "tablet"]
-Period = Literal["daily", "weekly", "monthly"]
-RegionType = Literal["cities", "regions", "all"]
+allowed_hosts = [
+    "127.0.0.1:*",
+    "localhost:*",
+    "[::1]:*",
+]
+
+allowed_origins = [
+    "http://127.0.0.1:*",
+    "http://localhost:*",
+]
+
+if RENDER_HOST:
+    allowed_hosts.append(f"{RENDER_HOST}:*")
+    allowed_origins.append(f"https://{RENDER_HOST}")
+
+if CUSTOM_HOST:
+    allowed_hosts.append(f"{CUSTOM_HOST}:*")
+    allowed_origins.append(f"https://{CUSTOM_HOST}")
 
 mcp = FastMCP(
     name="Yandex Wordstat",
     instructions="Инструменты для Wordstat: top requests, dynamics, regions, user info",
+    host="0.0.0.0",
+    transport_security=TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=allowed_hosts,
+        allowed_origins=allowed_origins,
+    ),
     json_response=True,
 )
 
